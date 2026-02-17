@@ -1,0 +1,356 @@
+@startuml class-diagram
+
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+title Diagrama de Clases - Sistema Bancario (Dominio + Patrones)
+
+' ==================== DOMAIN MODELS ====================
+
+package "Domain Models" {
+    
+    class Customer {
+        - id: UUID
+        - name: str
+        - email: str
+        - status: str
+        - created_at: datetime
+        + __init__(name, email)
+        + __repr__(): str
+    }
+    
+    class Account {
+        - id: UUID
+        - customer_id: UUID
+        - currency: Currency
+        - _balance: Decimal
+        - status: AccountStatus
+        - created_at: datetime
+        + balance: Decimal
+        + can_operate(): bool
+        + credit(amount: Decimal): void
+        + debit(amount: Decimal): void
+        + freeze(): void
+        + unfreeze(): void
+        + close(): void
+    }
+    
+    class Transaction {
+        - id: UUID
+        - type: TransactionType
+        - amount: Decimal
+        - currency: Currency
+        - from_account_id: UUID
+        - to_account_id: UUID
+        - status: TransactionStatus
+        - fee: Decimal
+        - description: str
+        - rejection_reason: str
+        - created_at: datetime
+        + approve(): void
+        + reject(reason: str): void
+    }
+    
+    class LedgerEntry {
+        - id: UUID
+        - account_id: UUID
+        - transaction_id: UUID
+        - direction: LedgerDirection
+        - amount: Decimal
+        - description: str
+        - created_at: datetime
+    }
+    
+    enum AccountStatus {
+        ACTIVE
+        FROZEN
+        CLOSED
+    }
+    
+    enum TransactionType {
+        DEPOSIT
+        WITHDRAW
+        TRANSFER
+    }
+    
+    enum TransactionStatus {
+        PENDING
+        APPROVED
+        REJECTED
+    }
+    
+    enum LedgerDirection {
+        DEBIT
+        CREDIT
+    }
+    
+    enum Currency {
+        USD
+    }
+    
+    class Money <<ValueObject>> {
+        - _amount: Decimal
+        - _currency: Currency
+        + amount: Decimal
+        + currency: Currency
+        + add(other: Money): Money
+        + sub(other: Money): Money
+    }
+}
+
+' ==================== DOMAIN EXCEPTIONS ====================
+
+package "Domain Exceptions" {
+    class DomainException
+    class InsufficientFundsError
+    class AccountFrozenError
+    class AccountClosedError
+    class InvalidTransactionError
+    class CustomerNotFoundError
+    class AccountNotFoundError
+    
+    DomainException <|-- InsufficientFundsError
+    DomainException <|-- AccountFrozenError
+    DomainException <|-- AccountClosedError
+    DomainException <|-- InvalidTransactionError
+    DomainException <|-- CustomerNotFoundError
+    DomainException <|-- AccountNotFoundError
+}
+
+' ==================== STRATEGY PATTERN - FEE ====================
+
+package "Fee Strategies" <<Rectangle>> {
+    
+    interface FeeStrategy {
+        + calculate_fee(amount: Decimal): Decimal
+        + get_name(): str
+    }
+    
+    class NoFeeStrategy {
+        + calculate_fee(amount: Decimal): Decimal
+        + get_name(): str
+    }
+    
+    class FlatFeeStrategy {
+        - _flat_amount: Decimal
+        + calculate_fee(amount: Decimal): Decimal
+        + get_name(): str
+    }
+    
+    class PercentFeeStrategy {
+        - _percent: Decimal
+        + calculate_fee(amount: Decimal): Decimal
+        + get_name(): str
+    }
+    
+    class TieredFeeStrategy {
+        - _threshold: Decimal
+        - _low_tier_fee: Decimal
+        - _high_tier_percent: Decimal
+        + calculate_fee(amount: Decimal): Decimal
+        + get_name(): str
+    }
+    
+    FeeStrategy <|.. NoFeeStrategy
+    FeeStrategy <|.. FlatFeeStrategy
+    FeeStrategy <|.. PercentFeeStrategy
+    FeeStrategy <|.. TieredFeeStrategy
+}
+
+' ==================== STRATEGY PATTERN - RISK ====================
+
+package "Risk Strategies" <<Rectangle>> {
+    
+    class RiskCheckResult {
+        + passed: bool
+        + reason: str
+    }
+    
+    interface RiskStrategy {
+        + check(...): RiskCheckResult
+        + get_name(): str
+    }
+    
+    class MaxAmountRule {
+        - _max_amount: Decimal
+        + check(...): RiskCheckResult
+        + get_name(): str
+    }
+    
+    class VelocityRule {
+        - _max_transactions: int
+        - _time_window_minutes: int
+        + check(...): RiskCheckResult
+        + get_name(): str
+    }
+    
+    class DailyLimitRule {
+        - _daily_limit: Decimal
+        + check(...): RiskCheckResult
+        + get_name(): str
+    }
+    
+    RiskStrategy <|.. MaxAmountRule
+    RiskStrategy <|.. VelocityRule
+    RiskStrategy <|.. DailyLimitRule
+    RiskStrategy ..> RiskCheckResult : returns
+}
+
+' ==================== FACTORY PATTERN ====================
+
+package "Creational Patterns" <<Rectangle>> {
+    
+    class TransactionFactory <<Factory>> {
+        + {static} create_deposit(...): Transaction
+        + {static} create_withdraw(...): Transaction
+        + {static} create_transfer(...): Transaction
+    }
+    
+    class TransactionBuilder <<Builder>> {
+        - _type: TransactionType
+        - _amount: Decimal
+        - _currency: Currency
+        - _from_account_id: UUID
+        - _to_account_id: UUID
+        - _status: TransactionStatus
+        - _fee: Decimal
+        - _description: str
+        + with_id(id): TransactionBuilder
+        + with_type(type): TransactionBuilder
+        + with_amount(amount): TransactionBuilder
+        + with_currency(currency): TransactionBuilder
+        + from_account(id): TransactionBuilder
+        + to_account(id): TransactionBuilder
+        + with_status(status): TransactionBuilder
+        + with_fee(fee): TransactionBuilder
+        + with_description(desc): TransactionBuilder
+        + build(): Transaction
+        + reset(): TransactionBuilder
+    }
+    
+    TransactionFactory ..> Transaction : creates
+    TransactionBuilder ..> Transaction : builds
+}
+
+' ==================== SERVICE LAYER ====================
+
+package "Service Layer" {
+    
+    class BankingService {
+        - _customer_repo: CustomerRepository
+        - _account_repo: AccountRepository
+        - _transaction_repo: TransactionRepository
+        - _ledger_repo: LedgerEntryRepository
+        - _fee_strategy: FeeStrategy
+        - _risk_strategies: List[RiskStrategy]
+        + create_customer(name, email): Customer
+        + get_customer(id): Customer
+        + create_account(customer_id, currency): Account
+        + get_account(id): Account
+        + deposit(account_id, amount, desc): Transaction
+        + withdraw(account_id, amount, desc): Transaction
+        + transfer(from_id, to_id, amount, desc): Transaction
+        + list_transactions(account_id, limit, offset): List
+        - _check_risk_rules(...): RiskCheckResult
+    }
+    
+    BankingService --> FeeStrategy : uses
+    BankingService --> RiskStrategy : uses
+    BankingService ..> Customer : manages
+    BankingService ..> Account : manages
+    BankingService ..> Transaction : creates
+    BankingService ..> LedgerEntry : creates
+}
+
+' ==================== FACADE PATTERN ====================
+
+package "Application Layer" <<Rectangle>> {
+    
+    class BankingFacade <<Facade>> {
+        - _service: BankingService
+        + create_customer(name, email): Customer
+        + get_customer(id): Customer
+        + create_account(customer_id): Account
+        + get_account(id): Account
+        + get_customer_accounts(customer_id): List
+        + deposit(account_id, amount): Transaction
+        + withdraw(account_id, amount): Transaction
+        + transfer(from_id, to_id, amount): Transaction
+        + list_transactions(account_id): List
+        + get_transaction(id): Transaction
+    }
+    
+    BankingFacade --> BankingService : delegates
+}
+
+' ==================== REPOSITORY INTERFACES ====================
+
+package "Repository Interfaces" {
+    
+    interface CustomerRepository {
+        + save(customer): Customer
+        + find_by_id(id): Customer
+        + find_by_email(email): Customer
+        + list_all(limit, offset): List
+        + delete(id): bool
+    }
+    
+    interface AccountRepository {
+        + save(account): Account
+        + find_by_id(id): Account
+        + find_by_customer_id(customer_id): List
+        + list_all(limit, offset): List
+        + delete(id): bool
+    }
+    
+    interface TransactionRepository {
+        + save(transaction): Transaction
+        + find_by_id(id): Transaction
+        + find_by_account_id(id): List
+        + find_recent_by_account(id, since): List
+        + list_all(limit, offset): List
+    }
+    
+    interface LedgerEntryRepository {
+        + save(entry): LedgerEntry
+        + find_by_account_id(id): List
+        + find_by_transaction_id(id): List
+    }
+}
+
+' ==================== RELATIONSHIPS ====================
+
+Customer "1" -- "*" Account : tiene
+Account "1" -- "*" LedgerEntry : registra
+Transaction "1" -- "*" LedgerEntry : genera
+
+BankingService --> CustomerRepository : usa
+BankingService --> AccountRepository : usa
+BankingService --> TransactionRepository : usa
+BankingService --> LedgerEntryRepository : usa
+
+note right of BankingFacade
+  <b>Facade Pattern</b>
+  Punto de entrada único
+  para la API.
+end note
+
+note right of FeeStrategy
+  <b>Strategy Pattern</b>
+  Algoritmos de comisiones
+  intercambiables.
+end note
+
+note right of RiskStrategy
+  <b>Strategy Pattern</b>
+  Reglas de riesgo/fraude
+  configurables.
+end note
+
+note right of TransactionFactory
+  <b>Factory Method</b>
+  Creación de transacciones
+  con validaciones.
+end note
+
+@enduml

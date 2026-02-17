@@ -1,0 +1,54 @@
+@startuml use-case-diagram
+
+left to right direction
+skinparam packageStyle rectangle
+
+title Diagrama de Casos de Uso - Sistema Bancario MVP
+
+:Cliente: as Cliente
+
+rectangle "Sistema Bancario" {
+    
+    ' Casos de uso principales
+    usecase "Crear Cliente" as UC1
+    usecase "Crear Cuenta" as UC2
+    usecase "Depositar" as UC3
+    usecase "Retirar" as UC4
+    usecase "Transferir" as UC5
+    usecase "Consultar Saldo" as UC6
+    usecase "Listar Transacciones" as UC7
+    
+    ' Proceso de transacción (simplificado)
+    usecase "Procesar\nTransacción" as UC_Process
+}
+
+' Relaciones Actor -> Casos de Uso
+Cliente --> UC1
+Cliente --> UC2
+Cliente --> UC3
+Cliente --> UC4
+Cliente --> UC5
+Cliente --> UC6
+Cliente --> UC7
+
+' Relaciones Include (simplificadas)
+UC3 .> UC_Process : <<include>>
+UC4 .> UC_Process : <<include>>
+UC5 .> UC_Process : <<include>>
+
+' Relaciones Extend
+UC2 ..> UC1 : <<extend>>\nsi cliente no existe
+
+note right of UC_Process
+  <b>Incluye:</b>
+  • Calcular comisión
+  • Validar reglas de riesgo
+  • Validar fondos suficientes
+  • Registrar en ledger (doble entrada)
+  
+  <b>Estrategias disponibles:</b>
+  - Comisión: sin cargo, fija, porcentual, escalonada
+  - Riesgo: monto máx, velocidad, límite diario
+end note
+
+@enduml
