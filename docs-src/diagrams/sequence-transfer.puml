@@ -1,0 +1,267 @@
+@startuml sequence-transfer
+!define LIGHTBLUE #E3F2FD
+!define BLUE #2196F3
+!define GREEN #4CAF50
+!define ORANGE #FF9800
+!define RED #F44336
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 10
+skinparam maxmessagesize 150
+
+title Diagrama de Secuencia - Transferencia entre Cuentas\n(Incluye: Risk Check + Fee Calculation + Double-Entry Ledger + Persistencia)
+
+actor "Cliente" as Client
+participant "API\n(FastAPI)" as API
+participant "BankingFacade\n<<Facade>>" as Facade
+participant "BankingService" as Service
+participant "FeeStrategy\n<<Strategy>>" as FeeStrategy
+participant "RiskStrategy[]\n<<Strategy>>" as RiskStrategy
+participant "AccountRepo" as AccountRepo
+participant "Account\n(From)" as FromAccount
+participant "Account\n(To)" as ToAccount
+participant "TransactionFactory\n<<Factory>>" as Factory
+participant "Transaction" as Transaction
+participant "TransactionRepo" as TransactionRepo
+participant "LedgerEntryRepo" as LedgerRepo
+database "PostgreSQL" as DB
+
+== 1. Solicitud de Transferencia ==
+
+Client -> API : POST /transactions/transfer\n{from_account_id, to_account_id,\namount, description}
+activate API #LIGHTBLUE
+
+API -> API : Validar request\n(Pydantic DTO)
+
+API -> Facade : transfer(from_account_id,\nto_account_id, amount, description)
+activate Facade #BLUE
+
+Facade -> Service : transfer(from_account_id,\nto_account_id, amount, description)
+activate Service #GREEN
+
+== 2. Obtener y Validar Cuentas ==
+
+Service -> AccountRepo : find_by_id(from_account_id)
+activate AccountRepo
+AccountRepo -> DB : SELECT * FROM accounts\nWHERE id = from_account_id
+DB --> AccountRepo : AccountORM
+AccountRepo -> AccountRepo : _to_domain(AccountORM)
+AccountRepo --> Service : from_account
+deactivate AccountRepo
+
+Service -> AccountRepo : find_by_id(to_account_id)
+activate AccountRepo
+AccountRepo -> DB : SELECT * FROM accounts\nWHERE id = to_account_id
+DB --> AccountRepo : AccountORM
+AccountRepo -> AccountRepo : _to_domain(AccountORM)
+AccountRepo --> Service : to_account
+deactivate AccountRepo
+
+Service -> Service : Verificar misma moneda
+alt Monedas diferentes
+    Service --> API : ValueError("Las cuentas deben\ntener la misma moneda")
+    API --> Client : 400 Bad Request
+    [<- API
+    [<- Facade
+    [<- Service
+end
+
+== 3. Calcular Comisión (Strategy Pattern) ==
+
+Service -> FeeStrategy : calculate_fee(amount)
+activate FeeStrategy #ORANGE
+FeeStrategy -> FeeStrategy : Aplicar algoritmo\n(flat/percent/tiered)
+FeeStrategy --> Service : fee
+deactivate FeeStrategy
+
+Service -> Service : total_amount = amount + fee
+
+== 4. Validar Reglas de Riesgo (Strategy Pattern) ==
+
+Service -> Service : _check_risk_rules(amount,\nfrom_account_id, TRANSFER)
+
+loop Para cada RiskStrategy
+    Service -> RiskStrategy : check(amount, account_id,\ntype, get_recent_transactions)
+    activate RiskStrategy #ORANGE
+    
+    alt MaxAmountRule
+        RiskStrategy -> RiskStrategy : Verificar amount <= max_amount
+    else VelocityRule
+        RiskStrategy -> TransactionRepo : find_recent_by_account(account_id, since)
+        activate TransactionRepo
+        TransactionRepo -> DB : SELECT * FROM transactions\nWHERE created_at >= cutoff
+        DB --> TransactionRepo : List[TransactionORM]
+        TransactionRepo --> RiskStrategy : List[Transaction]
+        deactivate TransactionRepo
+        RiskStrategy -> RiskStrategy : Contar transacciones\nen ventana de tiempo
+    else DailyLimitRule
+        RiskStrategy -> TransactionRepo : find_recent_by_account(account_id,\nstart_of_day)
+        activate TransactionRepo
+        TransactionRepo -> DB : SELECT * FROM transactions\nWHERE created_at >= start_of_day
+        DB --> TransactionRepo : List[TransactionORM]
+        TransactionRepo --> RiskStrategy : List[Transaction]
+        deactivate TransactionRepo
+        RiskStrategy -> RiskStrategy : Sumar montos del día
+    end
+    
+    RiskStrategy --> Service : RiskCheckResult(passed, reason)
+    deactivate RiskStrategy
+    
+    alt Risk check failed
+        Service -> Service : Salir del loop
+    end
+end
+
+alt Regla de riesgo no pasada
+    Service -> Factory : create_transfer(from_account_id,\nto_account_id, amount, ...)
+    activate Factory #ORANGE
+    Factory -> Transaction ** : new Transaction(type=TRANSFER, ...)
+    Factory --> Service : transaction
+    deactivate Factory
+    
+    Service -> Transaction : reject(reason)
+    activate Transaction
+    Transaction -> Transaction : status = REJECTED\nrejection_reason = reason
+    deactivate Transaction
+    
+    Service -> TransactionRepo : save(transaction)
+    activate TransactionRepo
+    TransactionRepo -> DB : INSERT INTO transactions
+    DB --> TransactionRepo : OK
+    deactivate TransactionRepo
+    
+    Service --> Facade : transaction (REJECTED)
+    Facade --> API : transaction (REJECTED)
+    API --> Client : 201 Created\n{status: "REJECTED",\nrejection_reason: "..."}
+    [<- API
+    [<- Facade
+    [<- Service
+end
+
+== 5. Validar Fondos Suficientes ==
+
+Service -> FromAccount : balance
+FromAccount --> Service : current_balance
+
+alt Fondos insuficientes
+    Service -> Factory : create_transfer(...)
+    activate Factory #ORANGE
+    Factory -> Transaction ** : new Transaction(type=TRANSFER, ...)
+    Factory --> Service : transaction
+    deactivate Factory
+    
+    Service -> Transaction : reject("Fondos insuficientes: ...")
+    Transaction -> Transaction : status = REJECTED
+    
+    Service -> TransactionRepo : save(transaction)
+    TransactionRepo -> DB : INSERT INTO transactions
+    
+    Service --> API : transaction (REJECTED)
+    API --> Client : 201 Created (REJECTED)
+    [<- API
+    [<- Facade
+    [<- Service
+end
+
+== 6. Crear Transacción (Factory Pattern) ==
+
+Service -> Factory : create_transfer(from_account_id,\nto_account_id, amount,\ncurrency, description, fee)
+activate Factory #ORANGE
+
+Factory -> Factory : Validar parámetros:\n- amount > 0\n- from_id != to_id\n- ambas cuentas presentes
+
+Factory -> Transaction ** : new Transaction(\ntype=TRANSFER,\namount=amount,\nfrom_account_id=from_account_id,\nto_account_id=to_account_id,\nstatus=PENDING,\nfee=fee)
+
+Factory --> Service : transaction
+deactivate Factory
+
+== 7. Aplicar Transferencia (Atómica a nivel aplicación) ==
+
+Service -> FromAccount : debit(total_amount)
+activate FromAccount
+FromAccount -> FromAccount : Validar estado (ACTIVE)\nValidar balance >= amount
+FromAccount -> FromAccount : _balance -= total_amount
+FromAccount --> Service : OK
+deactivate FromAccount
+
+Service -> ToAccount : credit(amount)
+activate ToAccount
+ToAccount -> ToAccount : Validar estado != CLOSED
+ToAccount -> ToAccount : _balance += amount
+ToAccount --> Service : OK
+deactivate ToAccount
+
+== 8. Aprobar Transacción ==
+
+Service -> Transaction : approve()
+activate Transaction
+Transaction -> Transaction : Validar status == PENDING
+Transaction -> Transaction : status = APPROVED
+Transaction --> Service : OK
+deactivate Transaction
+
+== 9. Persistir Cuentas y Transacción ==
+
+Service -> AccountRepo : save(from_account)
+activate AccountRepo
+AccountRepo -> DB : UPDATE accounts\nSET balance = new_balance\nWHERE id = from_account_id
+DB --> AccountRepo : OK
+deactivate AccountRepo
+
+Service -> AccountRepo : save(to_account)
+activate AccountRepo
+AccountRepo -> DB : UPDATE accounts\nSET balance = new_balance\nWHERE id = to_account_id
+DB --> AccountRepo : OK
+deactivate AccountRepo
+
+Service -> TransactionRepo : save(transaction)
+activate TransactionRepo
+TransactionRepo -> DB : INSERT INTO transactions\n(id, type, amount, status,\nfrom_account_id, to_account_id,\nfee, description, ...)
+DB --> TransactionRepo : OK
+deactivate TransactionRepo
+
+== 10. Crear Asientos Contables (Double-Entry Ledger) ==
+
+Service -> Service : Crear LedgerEntry para débito
+Service -> LedgerEntry ** : new LedgerEntry(\naccount_id=from_account_id,\ntransaction_id=transaction.id,\ndirection=DEBIT,\namount=total_amount,\ndescription="Transferencia enviada")
+
+Service -> LedgerRepo : save(debit_entry)
+activate LedgerRepo
+LedgerRepo -> DB : INSERT INTO ledger_entries\n(account_id, transaction_id,\ndirection=DEBIT, amount=total_amount)
+DB --> LedgerRepo : OK
+deactivate LedgerRepo
+
+Service -> Service : Crear LedgerEntry para crédito
+Service -> LedgerEntry ** : new LedgerEntry(\naccount_id=to_account_id,\ntransaction_id=transaction.id,\ndirection=CREDIT,\namount=amount,\ndescription="Transferencia recibida")
+
+Service -> LedgerRepo : save(credit_entry)
+activate LedgerRepo
+LedgerRepo -> DB : INSERT INTO ledger_entries\n(account_id, transaction_id,\ndirection=CREDIT, amount=amount)
+DB --> LedgerRepo : OK
+deactivate LedgerRepo
+
+== 11. Retornar Resultado ==
+
+Service --> Facade : transaction (APPROVED)
+deactivate Service
+
+Facade --> API : transaction (APPROVED)
+deactivate Facade
+
+API -> API : Convertir a TransactionResponse DTO
+
+API --> Client : 201 Created\n{\n  "id": "...",\n  "type": "TRANSFER",\n  "amount": 100.00,\n  "fee": 0.50,\n  "status": "APPROVED",\n  "from_account_id": "...",\n  "to_account_id": "...",\n  ...\n}
+deactivate API
+
+note over Client, DB
+  <b>Puntos Clave del Flujo:</b>
+  1. <b>Validación en capas:</b> Request (Pydantic) → Dominio (invariantes) → Negocio (risk rules)
+  2. <b>Strategy Pattern:</b> Fee y Risk calculados dinámicamente con estrategias configurables
+  3. <b>Factory Pattern:</b> TransactionFactory encapsula creación con validaciones
+  4. <b>Atomicidad:</b> Operación atómica a nivel de aplicación (debit + credit juntos)
+  5. <b>Double-Entry:</b> Dos asientos contables (DEBIT/CREDIT) para auditabilidad
+  6. <b>Error Handling:</b> Transacciones rechazadas se persisten con razón para análisis
+  7. <b>Clean Architecture:</b> API → Facade → Service → Domain → Repository → DB
+end note
+
+@enduml
