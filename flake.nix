@@ -8,42 +8,31 @@
     resources.url = "github:yuuhikaze/resources";
   };
 
-  outputs =
-    {
-      nixpkgs,
-      flake-utils,
-      rust-overlay,
-      resources,
-      ...
-    }:
-    flake-utils.lib.eachDefaultSystem (
-      system:
+  outputs = { nixpkgs, flake-utils, rust-overlay, resources, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        pythonEnv = pkgs.python3.withPackages (
-          ps: with ps; [
+        pythonEnv = pkgs.python3.withPackages (ps:
+          with ps; [
             fastapi
             streamlit
             uvicorn
             sqlalchemy
+            psycopg2
             pydantic
+            pydantic-settings
+            email-validator
             pytest
             httpx
             requests
-          ]
-        );
-      in
-      {
+            python-multipart
+          ]);
+      in {
         devShells.default = pkgs.mkShell {
           inputsFrom = [ resources.outputs.devShells.${system}.docs ];
-          buildInputs = [
-            pythonEnv
-            pkgs.docker
-            pkgs.docker-compose
-            pkgs.git
-          ];
+          buildInputs = [ pythonEnv pkgs.docker pkgs.docker-compose pkgs.git ];
           shellHook = ''
             echo "====== PSET1 Development Environment ======="
             echo "Python: $(python --version)"
@@ -51,6 +40,5 @@
             echo "============================================"
           '';
         };
-      }
-    );
+      });
 }
