@@ -15,8 +15,15 @@ from app.repositories.orm_models import Base
 
 
 # Database configuration from environment variables
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://postgres:postgres@db:5432/banking_db"
+POSTGRES_USER = os.getenv("POSTGRES_USER", "pset2")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "pset2password")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "db")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "pset2_db")
+
+DATABASE_URL = (
+    f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@"
+    f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 )
 
 # Create engine
@@ -74,5 +81,9 @@ def get_db_session() -> Generator[Session, None, None]:
     session = SessionLocal()
     try:
         yield session
+        session.commit()  # Commit after successful request
+    except Exception:
+        session.rollback()  # Rollback on error
+        raise
     finally:
         session.close()
