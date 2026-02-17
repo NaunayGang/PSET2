@@ -1,22 +1,13 @@
 @startuml class-diagram
-!define LIGHTBLUE #E3F2FD
-!define BLUE #2196F3
-!define GREEN #4CAF50
-!define ORANGE #FF9800
-!define PURPLE #9C27B0
 
 skinparam classAttributeIconSize 0
-skinparam class {
-    BackgroundColor LIGHTBLUE
-    BorderColor BLUE
-    ArrowColor BLUE
-}
+skinparam packageStyle rectangle
 
 title Diagrama de Clases - Sistema Bancario (Dominio + Patrones)
 
 ' ==================== DOMAIN MODELS ====================
 
-package "Domain Models" <<Rectangle>> {
+package "Domain Models" {
     
     class Customer {
         - id: UUID
@@ -49,12 +40,12 @@ package "Domain Models" <<Rectangle>> {
         - type: TransactionType
         - amount: Decimal
         - currency: Currency
-        - from_account_id: UUID | None
-        - to_account_id: UUID | None
+        - from_account_id: UUID
+        - to_account_id: UUID
         - status: TransactionStatus
         - fee: Decimal
-        - description: str | None
-        - rejection_reason: str | None
+        - description: str
+        - rejection_reason: str
         - created_at: datetime
         + approve(): void
         + reject(reason: str): void
@@ -66,7 +57,7 @@ package "Domain Models" <<Rectangle>> {
         - transaction_id: UUID
         - direction: LedgerDirection
         - amount: Decimal
-        - description: str | None
+        - description: str
         - created_at: datetime
     }
     
@@ -102,30 +93,37 @@ package "Domain Models" <<Rectangle>> {
         - _currency: Currency
         + amount: Decimal
         + currency: Currency
-        + __add__(other: Money): Money
-        + __sub__(other: Money): Money
+        + add(other: Money): Money
+        + sub(other: Money): Money
     }
 }
 
 ' ==================== DOMAIN EXCEPTIONS ====================
 
-package "Domain Exceptions" <<Rectangle>> {
-    class DomainException extends Exception
-    class InsufficientFundsError extends DomainException
-    class AccountFrozenError extends DomainException
-    class AccountClosedError extends DomainException
-    class InvalidTransactionError extends DomainException
-    class CustomerNotFoundError extends DomainException
-    class AccountNotFoundError extends DomainException
+package "Domain Exceptions" {
+    class DomainException
+    class InsufficientFundsError
+    class AccountFrozenError
+    class AccountClosedError
+    class InvalidTransactionError
+    class CustomerNotFoundError
+    class AccountNotFoundError
+    
+    DomainException <|-- InsufficientFundsError
+    DomainException <|-- AccountFrozenError
+    DomainException <|-- AccountClosedError
+    DomainException <|-- InvalidTransactionError
+    DomainException <|-- CustomerNotFoundError
+    DomainException <|-- AccountNotFoundError
 }
 
 ' ==================== STRATEGY PATTERN - FEE ====================
 
-package "Fee Strategies (Strategy Pattern)" <<Rectangle>> #GREEN {
+package "Fee Strategies" <<Rectangle>> {
     
-    abstract class FeeStrategy <<interface>> {
-        + {abstract} calculate_fee(amount: Decimal): Decimal
-        + {abstract} get_name(): str
+    interface FeeStrategy {
+        + calculate_fee(amount: Decimal): Decimal
+        + get_name(): str
     }
     
     class NoFeeStrategy {
@@ -161,16 +159,16 @@ package "Fee Strategies (Strategy Pattern)" <<Rectangle>> #GREEN {
 
 ' ==================== STRATEGY PATTERN - RISK ====================
 
-package "Risk Strategies (Strategy Pattern)" <<Rectangle>> #ORANGE {
+package "Risk Strategies" <<Rectangle>> {
     
     class RiskCheckResult {
         + passed: bool
-        + reason: str | None
+        + reason: str
     }
     
-    abstract class RiskStrategy <<interface>> {
-        + {abstract} check(amount, account_id, type, get_recent_txns): RiskCheckResult
-        + {abstract} get_name(): str
+    interface RiskStrategy {
+        + check(...): RiskCheckResult
+        + get_name(): str
     }
     
     class MaxAmountRule {
@@ -200,23 +198,23 @@ package "Risk Strategies (Strategy Pattern)" <<Rectangle>> #ORANGE {
 
 ' ==================== FACTORY PATTERN ====================
 
-package "Creational Patterns" <<Rectangle>> #PURPLE {
+package "Creational Patterns" <<Rectangle>> {
     
-    class TransactionFactory <<Factory Method>> {
+    class TransactionFactory <<Factory>> {
         + {static} create_deposit(...): Transaction
         + {static} create_withdraw(...): Transaction
         + {static} create_transfer(...): Transaction
     }
     
     class TransactionBuilder <<Builder>> {
-        - _type: TransactionType | None
-        - _amount: Decimal | None
+        - _type: TransactionType
+        - _amount: Decimal
         - _currency: Currency
-        - _from_account_id: UUID | None
-        - _to_account_id: UUID | None
+        - _from_account_id: UUID
+        - _to_account_id: UUID
         - _status: TransactionStatus
         - _fee: Decimal
-        - _description: str | None
+        - _description: str
         + with_id(id): TransactionBuilder
         + with_type(type): TransactionBuilder
         + with_amount(amount): TransactionBuilder
@@ -236,7 +234,7 @@ package "Creational Patterns" <<Rectangle>> #PURPLE {
 
 ' ==================== SERVICE LAYER ====================
 
-package "Service Layer" <<Rectangle>> {
+package "Service Layer" {
     
     class BankingService {
         - _customer_repo: CustomerRepository
@@ -252,7 +250,7 @@ package "Service Layer" <<Rectangle>> {
         + deposit(account_id, amount, desc): Transaction
         + withdraw(account_id, amount, desc): Transaction
         + transfer(from_id, to_id, amount, desc): Transaction
-        + list_transactions(account_id, limit, offset): List[Transaction]
+        + list_transactions(account_id, limit, offset): List
         - _check_risk_rules(...): RiskCheckResult
     }
     
@@ -266,72 +264,65 @@ package "Service Layer" <<Rectangle>> {
 
 ' ==================== FACADE PATTERN ====================
 
-package "Application Layer (Facade Pattern)" <<Rectangle>> #PURPLE {
+package "Application Layer" <<Rectangle>> {
     
     class BankingFacade <<Facade>> {
-        - _customer_repo: CustomerRepository
-        - _account_repo: AccountRepository
-        - _transaction_repo: TransactionRepository
-        - _ledger_repo: LedgerEntryRepository
-        - _fee_strategy: FeeStrategy
-        - _risk_strategies: List[RiskStrategy]
         - _service: BankingService
         + create_customer(name, email): Customer
         + get_customer(id): Customer
-        + create_account(customer_id, currency): Account
+        + create_account(customer_id): Account
         + get_account(id): Account
-        + get_customer_accounts(customer_id): List[Account]
-        + deposit(account_id, amount, desc): Transaction
-        + withdraw(account_id, amount, desc): Transaction
-        + transfer(from_id, to_id, amount, desc): Transaction
-        + list_transactions(account_id, limit, offset): List[Transaction]
-        + get_transaction(id): Transaction | None
-        - _get_fee_strategy(name): FeeStrategy
+        + get_customer_accounts(customer_id): List
+        + deposit(account_id, amount): Transaction
+        + withdraw(account_id, amount): Transaction
+        + transfer(from_id, to_id, amount): Transaction
+        + list_transactions(account_id): List
+        + get_transaction(id): Transaction
     }
     
-    BankingFacade --> BankingService : delegates to
+    BankingFacade --> BankingService : delegates
 }
 
 ' ==================== REPOSITORY INTERFACES ====================
 
-package "Repository Interfaces (Ports)" <<Rectangle>> {
+package "Repository Interfaces" {
     
-    interface CustomerRepository <<Protocol>> {
+    interface CustomerRepository {
         + save(customer): Customer
-        + find_by_id(id): Customer | None
-        + find_by_email(email): Customer | None
-        + list_all(limit, offset): List[Customer]
+        + find_by_id(id): Customer
+        + find_by_email(email): Customer
+        + list_all(limit, offset): List
         + delete(id): bool
     }
     
-    interface AccountRepository <<Protocol>> {
+    interface AccountRepository {
         + save(account): Account
-        + find_by_id(id): Account | None
-        + find_by_customer_id(customer_id): List[Account]
-        + list_all(limit, offset): List[Account]
+        + find_by_id(id): Account
+        + find_by_customer_id(customer_id): List
+        + list_all(limit, offset): List
         + delete(id): bool
     }
     
-    interface TransactionRepository <<Protocol>> {
+    interface TransactionRepository {
         + save(transaction): Transaction
-        + find_by_id(id): Transaction | None
-        + find_by_account_id(id, limit, offset): List[Transaction]
-        + find_recent_by_account(id, since): List[Transaction]
-        + list_all(limit, offset): List[Transaction]
+        + find_by_id(id): Transaction
+        + find_by_account_id(id): List
+        + find_recent_by_account(id, since): List
+        + list_all(limit, offset): List
     }
     
-    interface LedgerEntryRepository <<Protocol>> {
+    interface LedgerEntryRepository {
         + save(entry): LedgerEntry
-        + find_by_account_id(id, limit, offset): List[LedgerEntry]
-        + find_by_transaction_id(id): List[LedgerEntry]
+        + find_by_account_id(id): List
+        + find_by_transaction_id(id): List
     }
 }
 
 ' ==================== RELATIONSHIPS ====================
 
-Customer "1" -- "*" Account : tiene >
-Account "1" -- "*" LedgerEntry : registra >
-Transaction "1" -- "*" LedgerEntry : genera >
+Customer "1" -- "*" Account : tiene
+Account "1" -- "*" LedgerEntry : registra
+Transaction "1" -- "*" LedgerEntry : genera
 
 BankingService --> CustomerRepository : usa
 BankingService --> AccountRepository : usa
@@ -341,40 +332,25 @@ BankingService --> LedgerEntryRepository : usa
 note right of BankingFacade
   <b>Facade Pattern</b>
   Punto de entrada único
-  para la capa de aplicación.
-  Simplifica el acceso al
-  subsistema complejo.
+  para la API.
 end note
 
 note right of FeeStrategy
   <b>Strategy Pattern</b>
-  Permite cambiar el algoritmo
-  de cálculo de comisiones
-  dinámicamente sin modificar
-  el código cliente.
+  Algoritmos de comisiones
+  intercambiables.
 end note
 
 note right of RiskStrategy
   <b>Strategy Pattern</b>
-  Permite configurar múltiples
-  reglas de riesgo/fraude que
-  se evalúan antes de aprobar
-  una transacción.
+  Reglas de riesgo/fraude
+  configurables.
 end note
 
 note right of TransactionFactory
   <b>Factory Method</b>
-  Encapsula la creación de
-  diferentes tipos de
-  transacciones con
-  validaciones específicas.
-end note
-
-note right of TransactionBuilder
-  <b>Builder Pattern</b>
-  Construye transacciones
-  complejas paso a paso con
-  una interfaz fluida.
+  Creación de transacciones
+  con validaciones.
 end note
 
 @enduml
