@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: pset2_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pset2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pset2password}
+      POSTGRES_DB: ${POSTGRES_DB:-pset2_db}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - pset2_network
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: pset2_api
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-pset2}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pset2password}
+      POSTGRES_DB: ${POSTGRES_DB:-pset2_db}
+    ports:
+      - "8000:8000"
+    networks:
+      - pset2_network
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: pset2_ui
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-http://api:8000}
+    ports:
+      - "8501:8501"
+    networks:
+      - pset2_network
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  db_data:
+
+networks:
+  pset2_network:
+    driver: bridge
