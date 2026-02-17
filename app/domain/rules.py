@@ -1,11 +1,14 @@
 """
 Business rules and strategies for the banking system.
 
-This module implements the Strategy pattern for fee calculation.
+This module implements the Strategy pattern for fee calculation and risk/fraud detection.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Callable, Optional
+from uuid import UUID
 
 
 # ==================== Fee Strategies (Strategy Pattern) ====================
@@ -146,3 +149,197 @@ class TieredFeeStrategy(FeeStrategy):
             f"Comisión escalonada: <${self._threshold}=${self._low_tier_fee}, "
             f">=${self._threshold}={self._high_tier_percent}%"
         )
+
+
+# ==================== Risk/Fraud Strategies (Strategy Pattern) ====================
+
+
+class RiskCheckResult:
+    """
+    Result of a risk check.
+
+    Contains information about whether the transaction passed
+    the risk check and any rejection reason.
+    """
+
+    def __init__(self, passed: bool, reason: Optional[str] = None):
+        self.passed = passed
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        if self.passed:
+            return "RiskCheckResult(passed=True)"
+        return f"RiskCheckResult(passed=False, reason='{self.reason}')"
+
+
+class RiskStrategy(ABC):
+    """
+    Abstract base class for risk/fraud detection strategies.
+
+    Implements the Strategy pattern to allow different risk rules
+    to be applied to transactions.
+    """
+
+    @abstractmethod
+    def check(
+        self,
+        amount: Decimal,
+        account_id: UUID,
+        transaction_type: str,
+        get_recent_transactions: Callable,
+    ) -> RiskCheckResult:
+        """
+        Check if a transaction passes this risk rule.
+
+        Args:
+            amount: Transaction amount
+            account_id: Account performing the transaction
+            transaction_type: Type of transaction
+            get_recent_transactions: Callable to get recent transactions for the account
+
+        Returns:
+            RiskCheckResult indicating if check passed
+        """
+        pass
+
+    @abstractmethod
+    def get_name(self) -> str:
+        """Get the name of this risk strategy."""
+        pass
+
+
+class MaxAmountRule(RiskStrategy):
+    """
+    Risk rule that rejects transactions exceeding a maximum amount.
+
+    Example: Reject any transaction > $10,000
+    """
+
+    def __init__(self, max_amount: Decimal):
+        """
+        Initialize max amount rule.
+
+        Args:
+            max_amount: Maximum allowed transaction amount
+        """
+        if max_amount <= 0:
+            raise ValueError("El monto máximo debe ser positivo")
+        self._max_amount = max_amount
+
+    def check(
+        self,
+        amount: Decimal,
+        account_id: UUID,
+        transaction_type: str,
+        get_recent_transactions: Callable,
+    ) -> RiskCheckResult:
+        """Check if amount exceeds maximum."""
+        if amount > self._max_amount:
+            return RiskCheckResult(
+                passed=False,
+                reason=f"El monto ${amount} excede el límite máximo de ${self._max_amount}",
+            )
+        return RiskCheckResult(passed=True)
+
+    def get_name(self) -> str:
+        return f"Monto máximo: ${self._max_amount}"
+
+
+class VelocityRule(RiskStrategy):
+    """
+    Risk rule that rejects transactions if too many occur in a time window.
+
+    Example: Reject if more than 5 transactions in 10 minutes
+    """
+
+    def __init__(self, max_transactions: int, time_window_minutes: int):
+        """
+        Initialize velocity rule.
+
+        Args:
+            max_transactions: Maximum number of transactions allowed
+            time_window_minutes: Time window in minutes
+        """
+        if max_transactions <= 0:
+            raise ValueError("El número máximo de transacciones debe ser positivo")
+        if time_window_minutes <= 0:
+            raise ValueError("La ventana de tiempo debe ser positiva")
+
+        self._max_transactions = max_transactions
+        self._time_window_minutes = time_window_minutes
+
+    def check(
+        self,
+        amount: Decimal,
+        account_id: UUID,
+        transaction_type: str,
+        get_recent_transactions: Callable,
+    ) -> RiskCheckResult:
+        """Check if transaction velocity is within limits."""
+        cutoff_time = datetime.utcnow() - timedelta(minutes=self._time_window_minutes)
+        recent_txns = get_recent_transactions(account_id, cutoff_time)
+
+        if len(recent_txns) >= self._max_transactions:
+            return RiskCheckResult(
+                passed=False,
+                reason=(
+                    f"Demasiadas transacciones: {len(recent_txns)} en los últimos "
+                    f"{self._time_window_minutes} minutos (máximo: {self._max_transactions})"
+                ),
+            )
+        return RiskCheckResult(passed=True)
+
+    def get_name(self) -> str:
+        return (
+            f"Velocidad: máx {self._max_transactions} txns en "
+            f"{self._time_window_minutes} min"
+        )
+
+
+class DailyLimitRule(RiskStrategy):
+    """
+    Risk rule that rejects transactions if daily limit is exceeded.
+
+    Example: Reject if total transactions today > $50,000
+    """
+
+    def __init__(self, daily_limit: Decimal):
+        """
+        Initialize daily limit rule.
+
+        Args:
+            daily_limit: Maximum total transaction amount per day
+        """
+        if daily_limit <= 0:
+            raise ValueError("El límite diario debe ser positivo")
+        self._daily_limit = daily_limit
+
+    def check(
+        self,
+        amount: Decimal,
+        account_id: UUID,
+        transaction_type: str,
+        get_recent_transactions: Callable,
+    ) -> RiskCheckResult:
+        """Check if daily limit would be exceeded."""
+        start_of_day = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_txns = get_recent_transactions(account_id, start_of_day)
+
+        # Sum today's transaction amounts
+        today_total = sum(txn.amount for txn in today_txns)
+        new_total = today_total + amount
+
+        if new_total > self._daily_limit:
+            return RiskCheckResult(
+                passed=False,
+                reason=(
+                    f"Límite diario excedido: ${today_total} gastados hoy + "
+                    f"${amount} = ${new_total} > límite de ${self._daily_limit}"
+                ),
+            )
+        return RiskCheckResult(passed=True)
+
+    def get_name(self) -> str:
+        return f"Límite diario: ${self._daily_limit}"
