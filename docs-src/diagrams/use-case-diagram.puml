@@ -18,60 +18,37 @@ rectangle "Sistema Bancario" {
     usecase "Consultar Saldo" as UC6
     usecase "Listar Transacciones" as UC7
     
-    ' Casos de uso internos (validaciones)
-    usecase "Calcular Comisión" as UC_Fee
-    usecase "Validar Reglas\nde Riesgo" as UC_Risk
-    usecase "Validar Fondos\nSuficientes" as UC_Funds
-    usecase "Registrar en\nLedger" as UC_Ledger
+    ' Proceso de transacción (simplificado)
+    usecase "Procesar\nTransacción" as UC_Process
 }
 
 ' Relaciones Actor -> Casos de Uso
-Cliente --> UC1 : registra sus datos
-Cliente --> UC2 : solicita apertura
-Cliente --> UC3 : deposita fondos
-Cliente --> UC4 : retira efectivo
-Cliente --> UC5 : transfiere dinero
-Cliente --> UC6 : consulta balance
-Cliente --> UC7 : revisa historial
+Cliente --> UC1
+Cliente --> UC2
+Cliente --> UC3
+Cliente --> UC4
+Cliente --> UC5
+Cliente --> UC6
+Cliente --> UC7
 
-' Relaciones Include
-UC3 .> UC_Fee : <<include>>
-UC3 .> UC_Risk : <<include>>
-UC3 .> UC_Ledger : <<include>>
-
-UC4 .> UC_Fee : <<include>>
-UC4 .> UC_Risk : <<include>>
-UC4 .> UC_Funds : <<include>>
-UC4 .> UC_Ledger : <<include>>
-
-UC5 .> UC_Fee : <<include>>
-UC5 .> UC_Risk : <<include>>
-UC5 .> UC_Funds : <<include>>
-UC5 .> UC_Ledger : <<include>>
+' Relaciones Include (simplificadas)
+UC3 .> UC_Process : <<include>>
+UC4 .> UC_Process : <<include>>
+UC5 .> UC_Process : <<include>>
 
 ' Relaciones Extend
 UC2 ..> UC1 : <<extend>>\nsi cliente no existe
 
-note right of UC_Fee
-  <b>Estrategias de comisión:</b>
-  - Sin comisión (0%)
-  - Comisión fija ($0.50)
-  - Comisión porcentual (1.5%)
-  - Comisión escalonada
-end note
-
-note right of UC_Risk
-  <b>Reglas de riesgo/fraude:</b>
-  - Monto máximo por transacción
-  - Velocidad (5 txns en 10 min)
-  - Límite diario ($50,000)
-end note
-
-note bottom of UC_Ledger
-  <b>Contabilidad de doble entrada:</b>
-  Cada transacción genera asientos
-  DEBIT y CREDIT en el ledger
-  para auditabilidad completa.
+note right of UC_Process
+  <b>Incluye:</b>
+  • Calcular comisión
+  • Validar reglas de riesgo
+  • Validar fondos suficientes
+  • Registrar en ledger (doble entrada)
+  
+  <b>Estrategias disponibles:</b>
+  - Comisión: sin cargo, fija, porcentual, escalonada
+  - Riesgo: monto máx, velocidad, límite diario
 end note
 
 @enduml
