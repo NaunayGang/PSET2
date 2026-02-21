@@ -1,13 +1,18 @@
 """
 Business rules and strategies for the banking system.
 
-This module implements the Strategy pattern for fee calculation and risk/fraud detection.
+This module implements the Strategy pattern for:
+- Fee calculation strategies
+- Risk/Fraud detection strategies
+
+These strategies are configured and injected into services to make
+business rules flexible and extensible.
 """
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Protocol
 from uuid import UUID
 
 
