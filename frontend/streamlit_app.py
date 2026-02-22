@@ -15,6 +15,8 @@ API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 ENDPOINTS = {
     "create_customer": f"{API_BASE_URL}/customers",
     "create_account": f"{API_BASE_URL}/accounts",
+    "get_account": f"{API_BASE_URL}/accounts",
+    "get_transactions": f"{API_BASE_URL}/accounts",
     "deposit": f"{API_BASE_URL}/transactions/deposit",
     "withdraw": f"{API_BASE_URL}/transactions/withdraw",
     "transfer": f"{API_BASE_URL}/transactions/transfer",
@@ -274,6 +276,51 @@ def transfer_api(from_account_id: str, to_account_id: str, amount: float, descri
         )
         
         if response.status_code == 201:
+            return True, response.json()
+        else:
+            error_msg = response.json().get("detail", "Unknown error")
+            return False, {"error": error_msg}
+    
+    except requests.exceptions.ConnectionError:
+        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
+    except requests.exceptions.Timeout:
+        return False, {"error": "Request timeout. Please try again."}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+
+def get_account_api(account_id: str) -> tuple[bool, dict]:
+    """Call GET /accounts/{account_id} endpoint."""
+    try:
+        response = requests.get(
+            f"{ENDPOINTS['get_account']}/{account_id}",
+            timeout=10,
+        )
+        
+        if response.status_code == 200:
+            return True, response.json()
+        else:
+            error_msg = response.json().get("detail", "Unknown error")
+            return False, {"error": error_msg}
+    
+    except requests.exceptions.ConnectionError:
+        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
+    except requests.exceptions.Timeout:
+        return False, {"error": "Request timeout. Please try again."}
+    except Exception as e:
+        return False, {"error": str(e)}
+
+
+def get_transactions_api(account_id: str, limit: int = 100, offset: int = 0) -> tuple[bool, list]:
+    """Call GET /accounts/{account_id}/transactions endpoint."""
+    try:
+        response = requests.get(
+            f"{ENDPOINTS['get_transactions']}/{account_id}/transactions",
+            params={"limit": limit, "offset": offset},
+            timeout=10,
+        )
+        
+        if response.status_code == 200:
             return True, response.json()
         else:
             error_msg = response.json().get("detail", "Unknown error")
@@ -617,6 +664,129 @@ def render_transfer_form():
             st.error(f"❌ Transfer failed: {error_detail}")
 
 
+def render_account_detail():
+    """Render the account detail view."""
+    st.subheader("📊 Account Details")
+    
+    account_id = st.text_input(
+        "Account ID",
+        placeholder="Enter the account UUID",
+        help="UUID of the account to view",
+        key="detail_account_id",
+    )
+    
+    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    with col1:
+        load_btn = st.button("Load Account", key="load_account_btn", type="primary")
+    
+    if load_btn:
+        if not account_id.strip():
+            st.error("❌ Account ID is required")
+            return
+        
+        try:
+            from uuid import UUID
+            UUID(account_id.strip())
+        except ValueError:
+            st.error("❌ Invalid account ID format (must be a valid UUID)")
+            return
+        
+        # Load account details and transactions
+        with st.spinner("Loading account details..."):
+            success, account_data = get_account_api(account_id.strip())
+        
+        if not success:
+            st.error(f"Failed to load account: {account_data.get('error', 'Unknown error')}")
+            return
+        
+        # Display account details
+        st.success("✅ Account found!")
+        
+        # Account info in columns
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Balance", f"{account_data['balance']} {account_data['currency']}")
+        with col2:
+            st.metric("Currency", account_data['currency'])
+        with col3:
+            st.metric("Status", account_data['status'])
+        with col4:
+            st.metric("Created", account_data['created_at'][:10])
+        
+        # Full account details
+        with st.expander("📋 Full Account Details"):
+            st.write(f"**Account ID:** `{account_data['id']}`")
+            st.write(f"**Customer ID:** `{account_data['customer_id']}`")
+            st.write(f"**Currency:** {account_data['currency']}")
+            st.write(f"**Balance:** {account_data['balance']}")
+            st.write(f"**Status:** {account_data['status']}")
+            st.write(f"**Created At:** {account_data['created_at']}")
+        
+        # Load transactions
+        st.markdown("---")
+        st.subheader("📜 Transaction History")
+        
+        with st.spinner("Loading transactions..."):
+            txn_success, txn_data = get_transactions_api(account_id.strip())
+        
+        if not txn_success:
+            st.error(f"Failed to load transactions: {txn_data.get('error', 'Unknown error')}")
+        elif not txn_data:
+            st.info("📭 No transactions found for this account.")
+        else:
+            # Display transactions in a table
+            st.write(f"**Total transactions shown:** {len(txn_data)}")
+            
+            # Format data for display
+            transaction_display = []
+            for txn in txn_data:
+                transaction_display.append({
+                    "ID": str(txn['id'])[:8] + "...",
+                    "Type": txn['type'],
+                    "Amount": f"{txn['amount']} {txn['currency']}",
+                    "Fee": f"{txn['fee']} {txn['currency']}",
+                    "Status": txn['status'],
+                    "Description": txn.get('description', '-')[:30] + ("..." if txn.get('description') and len(txn.get('description', '')) > 30 else ""),
+                    "Created": txn['created_at'][:19],
+                })
+            
+            st.dataframe(transaction_display, use_container_width=True, hide_index=True)
+            
+            # Show detailed transaction info in expander
+            with st.expander("📝 View Transaction Details"):
+                selected_idx = st.selectbox(
+                    "Select a transaction to view details:",
+                    range(len(txn_data)),
+                    format_func=lambda i: f"{txn_data[i]['type']} - {txn_data[i]['amount']} {txn_data[i]['currency']} - {txn_data[i]['created_at'][:10]}"
+                )
+                
+                if selected_idx is not None:
+                    selected_txn = txn_data[selected_idx]
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write(f"**Transaction ID:** `{selected_txn['id']}`")
+                        st.write(f"**Type:** {selected_txn['type']}")
+                        st.write(f"**Amount:** {selected_txn['amount']} {selected_txn['currency']}")
+                        st.write(f"**Fee:** {selected_txn['fee']} {selected_txn['currency']}")
+                    
+                    with col2:
+                        st.write(f"**Status:** {selected_txn['status']}")
+                        st.write(f"**Description:** {selected_txn.get('description', 'N/A')}")
+                        st.write(f"**Created:** {selected_txn['created_at']}")
+                    
+                    if selected_txn.get('from_account_id'):
+                        st.write(f"**From Account:** `{selected_txn['from_account_id']}`")
+                    if selected_txn.get('to_account_id'):
+                        st.write(f"**To Account:** `{selected_txn['to_account_id']}`")
+                    
+                    if selected_txn.get('rejection_reason'):
+                        st.error(f"**Rejection Reason:** {selected_txn['rejection_reason']}")
+        
+        st.markdown("---")
+
+
 # ==================== Main App ====================
 
 def main():
@@ -624,7 +794,7 @@ def main():
     # Sidebar navigation
     page = st.sidebar.radio(
         "Select Action",
-        ["Home", "Create Customer", "Create Account", "Deposit", "Withdraw", "Transfer"],
+        ["Home", "Create Customer", "Create Account", "Account Details", "Deposit", "Withdraw", "Transfer"],
         index=0,
     )
     
@@ -642,6 +812,8 @@ def main():
         render_create_customer_form()
     elif page == "Create Account":
         render_create_account_form()
+    elif page == "Account Details":
+        render_account_detail()
     elif page == "Deposit":
         render_deposit_form()
     elif page == "Withdraw":
@@ -663,6 +835,7 @@ This application provides a simple interface to manage banking operations.
 ### Available Features:
 - **Create Customer** 👤: Register new customers with name and email
 - **Create Account** 💳: Open new accounts for existing customers
+- **Account Details** 📊: View account balance and transaction history
 - **Deposit** 💰: Deposit funds into an account
 - **Withdraw** 💸: Withdraw funds from an account
 - **Transfer** 🔄: Transfer funds between accounts
@@ -672,7 +845,8 @@ This application provides a simple interface to manage banking operations.
 2. Enter customer details and submit
 3. Copy the customer ID from the response
 4. Navigate to "Create Account" and create an account for the customer
-5. Use the account ID to perform transactions (Deposit, Withdraw, Transfer)
+5. Go to "Account Details" to view the account balance and transactions
+6. Use "Deposit", "Withdraw", or "Transfer" to manage funds
         """)
     
     with col2:
