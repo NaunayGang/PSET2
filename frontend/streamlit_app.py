@@ -161,177 +161,104 @@ def validate_transfer_form(from_id: str, to_id: str, amount: float) -> tuple[boo
 
 # ==================== API Functions ====================
 
+# Centralized API client for consistent error handling and configuration
+class APIClient:
+    def __init__(self, timeout: int = 10):
+        self.timeout = timeout
+
+    def _friendly_error(self, response: requests.Response) -> str:
+        try:
+            body = response.json()
+        except Exception:
+            return "Server returned an unexpected response. Please try again later."
+
+        # Prefer explicit 'detail' messages from API (business/domain errors)
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if detail:
+            return str(detail)
+
+        # Fallback generic messages by status code
+        if response.status_code == 404:
+            return "Resource not found. Verify the ID and try again."
+        if response.status_code == 400:
+            return "Request rejected. Check the provided data and try again."
+        if response.status_code >= 500:
+            return "Server error. Please try again later or contact support."
+
+        return "Request failed. Please try again."
+
+    def _request(self, method: str, url: str, **kwargs):
+        try:
+            resp = requests.request(method, url, timeout=self.timeout, **kwargs)
+        except requests.exceptions.ConnectionError:
+            return False, {"error": f"Cannot connect to the backend at {API_BASE_URL}. Is it running?"}
+        except requests.exceptions.Timeout:
+            return False, {"error": "Request timeout. Please try again."}
+        except Exception:
+            # Generic fallback without exposing internals
+            return False, {"error": "Unexpected error. Please try again."}
+
+        if resp.status_code in (200, 201):
+            try:
+                return True, resp.json()
+            except Exception:
+                return False, {"error": "Invalid response from server."}
+
+        # Non-success: map to friendly error message
+        return False, {"error": self._friendly_error(resp), "status_code": resp.status_code}
+
+    def get(self, url: str, params: dict | None = None):
+        return self._request("GET", url, params=params)
+
+    def post(self, url: str, json: dict | None = None):
+        return self._request("POST", url, json=json)
+
+
+# Instantiate a single client for the app
+client = APIClient(timeout=10)
+
+
 def create_customer_api(name: str, email: str) -> tuple[bool, dict]:
-    """Call POST /customers endpoint."""
-    try:
-        response = requests.post(
-            ENDPOINTS["create_customer"],
-            json={"name": name, "email": email},
-            timeout=10,
-        )
-        
-        if response.status_code == 201:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    return client.post(ENDPOINTS["create_customer"], json={"name": name, "email": email})
 
 
 def create_account_api(customer_id: str, currency: str) -> tuple[bool, dict]:
-    """Call POST /accounts endpoint."""
-    try:
-        response = requests.post(
-            ENDPOINTS["create_account"],
-            json={"customer_id": customer_id, "currency": currency},
-            timeout=10,
-        )
-        
-        if response.status_code == 201:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    return client.post(ENDPOINTS["create_account"], json={"customer_id": customer_id, "currency": currency})
 
 
 def deposit_api(account_id: str, amount: float, description: str = "") -> tuple[bool, dict]:
-    """Call POST /transactions/deposit endpoint."""
-    try:
-        response = requests.post(
-            ENDPOINTS["deposit"],
-            json={
-                "account_id": account_id,
-                "amount": str(amount),
-                "description": description if description.strip() else None,
-            },
-            timeout=10,
-        )
-        
-        if response.status_code == 201:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    payload = {"account_id": account_id, "amount": str(amount)}
+    if description.strip():
+        payload["description"] = description
+    return client.post(ENDPOINTS["deposit"], json=payload)
 
 
 def withdraw_api(account_id: str, amount: float, description: str = "") -> tuple[bool, dict]:
-    """Call POST /transactions/withdraw endpoint."""
-    try:
-        response = requests.post(
-            ENDPOINTS["withdraw"],
-            json={
-                "account_id": account_id,
-                "amount": str(amount),
-                "description": description if description.strip() else None,
-            },
-            timeout=10,
-        )
-        
-        if response.status_code == 201:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    payload = {"account_id": account_id, "amount": str(amount)}
+    if description.strip():
+        payload["description"] = description
+    return client.post(ENDPOINTS["withdraw"], json=payload)
 
 
 def transfer_api(from_account_id: str, to_account_id: str, amount: float, description: str = "") -> tuple[bool, dict]:
-    """Call POST /transactions/transfer endpoint."""
-    try:
-        response = requests.post(
-            ENDPOINTS["transfer"],
-            json={
-                "from_account_id": from_account_id,
-                "to_account_id": to_account_id,
-                "amount": str(amount),
-                "description": description if description.strip() else None,
-            },
-            timeout=10,
-        )
-        
-        if response.status_code == 201:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    payload = {
+        "from_account_id": from_account_id,
+        "to_account_id": to_account_id,
+        "amount": str(amount),
+    }
+    if description.strip():
+        payload["description"] = description
+    return client.post(ENDPOINTS["transfer"], json=payload)
 
 
 def get_account_api(account_id: str) -> tuple[bool, dict]:
-    """Call GET /accounts/{account_id} endpoint."""
-    try:
-        response = requests.get(
-            f"{ENDPOINTS['get_account']}/{account_id}",
-            timeout=10,
-        )
-        
-        if response.status_code == 200:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    return client.get(f"{ENDPOINTS['get_account']}/{account_id}")
 
 
 def get_transactions_api(account_id: str, limit: int = 100, offset: int = 0) -> tuple[bool, list]:
-    """Call GET /accounts/{account_id}/transactions endpoint."""
-    try:
-        response = requests.get(
-            f"{ENDPOINTS['get_transactions']}/{account_id}/transactions",
-            params={"limit": limit, "offset": offset},
-            timeout=10,
-        )
-        
-        if response.status_code == 200:
-            return True, response.json()
-        else:
-            error_msg = response.json().get("detail", "Unknown error")
-            return False, {"error": error_msg}
-    
-    except requests.exceptions.ConnectionError:
-        return False, {"error": f"Cannot connect to API at {API_BASE_URL}. Is the backend running?"}
-    except requests.exceptions.Timeout:
-        return False, {"error": "Request timeout. Please try again."}
-    except Exception as e:
-        return False, {"error": str(e)}
+    # The API accepts limit/offset; pass if provided
+    params = {"limit": limit, "offset": offset}
+    return client.get(f"{ENDPOINTS['get_transactions']}/{account_id}/transactions", params=params)
 
 
 # ==================== UI Components ====================
@@ -853,18 +780,12 @@ This application provides a simple interface to manage banking operations.
         st.markdown("""
 ### API Status
         """)
-        try:
-            response = requests.get(f"{API_BASE_URL}/health", timeout=5)
-            if response.status_code == 200:
-                st.success("✅ Backend is running")
-                api_info = response.json()
-                st.json(api_info)
-            else:
-                st.error("❌ Backend returned an error")
-        except requests.exceptions.ConnectionError:
-            st.error(f"❌ Cannot connect to backend at {API_BASE_URL}")
-        except Exception as e:
-            st.error(f"❌ Error checking backend: {str(e)}")
+        ok, api_info = client.get(f"{API_BASE_URL}/health")
+        if ok:
+            st.success("✅ Backend is running")
+            st.json(api_info)
+        else:
+            st.error(f"❌ Backend error: {api_info.get('error', 'Unable to reach backend')}")
 
 
 if __name__ == "__main__":
