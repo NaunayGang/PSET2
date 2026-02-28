@@ -1,0 +1,61 @@
+name: Task
+
+description: Standard task template for project workflow
+
+title: "[Task] <short title>"
+labels:
+  - docs
+
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What needs to be done and why?
+      placeholder: Describe the problem or objective.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the main area for this task.
+      options:
+        - backend
+        - frontend
+        - db
+        - docs
+        - testing
+    validations:
+      required: true
+
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      description: Relative effort estimate.
+      options:
+        - S
+        - M
+        - L
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: Add a checklist of verifiable outcomes.
+      value: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Criterion 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional implementation notes, links, screenshots, references.
