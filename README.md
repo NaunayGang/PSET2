@@ -243,3 +243,4 @@ Use this checklist to validate deliverables quickly.
 - The official execution path for this README is Docker Compose only.
 - Swagger (`/docs`) is the best source to inspect request/response DTOs.
 - For practical API exercise, `test_api.sh` can be used as a quick smoke test.
+- For the full issue #12 submission flow, see `docs-src/DEMO_CHECKLIST.md` and run `bash test_api.sh`.
