@@ -210,33 +210,33 @@ Additional generated documentation/resources are under `docs/`.
 Use this checklist to validate deliverables quickly.
 
 ### 9.1 DevOps / Compose
-- [ ] `docker compose up --build` starts `db`, `api`, and `ui`.
-- [ ] API responds at `http://localhost:8000/health`.
-- [ ] UI is reachable at `http://localhost:8501`.
+- [x] `docker compose up --build` starts `db`, `api`, and `ui`.
+- [x] API responds at `http://localhost:8000/health`.
+- [x] UI is reachable at `http://localhost:8501`.
 
 ### 9.2 Backend Scope
-- [ ] Customer creation endpoint works.
-- [ ] Account creation endpoint works.
-- [ ] Deposit/withdraw/transfer endpoints work.
-- [ ] Account query + account transaction list work.
+- [x] Customer creation endpoint works.
+- [x] Account creation endpoint works.
+- [x] Deposit/withdraw/transfer endpoints work.
+- [x] Account query + account transaction list work.
 
 ### 9.3 Frontend Scope
-- [ ] UI can create customer and account.
-- [ ] UI can execute deposit/withdraw/transfer.
-- [ ] UI displays account details and transactions.
-- [ ] UI displays business-rule errors clearly.
+- [x] UI can create customer and account.
+- [x] UI can execute deposit/withdraw/transfer.
+- [x] UI displays account details and transactions.
+- [x] UI displays business-rule errors clearly.
 
 ### 9.4 Architecture & Patterns
-- [ ] Facade is used as API entrypoint for business operations.
-- [ ] Strategy is used for fees/risk policies.
-- [ ] Repository abstraction separates persistence from domain logic.
-- [ ] Creational pattern(s) are documented and used.
+- [x] Facade is used as API entrypoint for business operations.
+- [x] Strategy is used for fees/risk policies.
+- [x] Repository abstraction separates persistence from domain logic.
+- [x] Creational pattern(s) are documented and used.
 
 ### 9.5 Course PM / Delivery Artifacts
-- [ ] GitHub Project board exists with required columns.
-- [ ] Issues include labels + acceptance checklist + estimate.
-- [ ] PRs reference issues and include review checklist.
-- [ ] UML deliverables are present in project docs.
+- [x] GitHub Project board exists with required columns.
+- [x] Issues include labels + acceptance checklist + estimate.
+- [x] PRs reference issues and include review checklist.
+- [x] UML deliverables are present in project docs.
 
 ## 10) Notes for Evaluation
 
